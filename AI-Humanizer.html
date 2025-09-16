@@ -1,0 +1,405 @@
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Text Cleanup: hidden and formatting characters</title>
+  <style>
+    :root{
+      --bg:#0f1320; --fg:#e6e9ef; --muted:#9aa5b1;
+      --acc:#5ac8fa; --panel:#12172a; --border:#22304a; --ok:#22c55e; --warn:#f59e0b;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      --sans: system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif;
+    }
+    html,body{height:100%}
+    body{
+      margin:0; background:linear-gradient(180deg,#0b1020,#0f1320 40%,#0e1427);
+      color:var(--fg); font-family:var(--sans); -webkit-font-smoothing:antialiased;
+    }
+    .container{max-width:980px;margin:40px auto;padding:0 16px}
+    h1{font-weight:800;letter-spacing:.2px;margin:.2em 0 .4em;font-size:clamp(22px,4vw,34px)}
+    .sub{color:var(--muted);margin-bottom:16px}
+    .card{
+      background:var(--panel); border:1px solid var(--border);
+      border-radius:14px; box-shadow:0 10px 30px rgba(0,0,0,.25), inset 0 1px 0 rgba(255,255,255,.03);
+      padding:10px;
+    }
+    .row{display:grid;grid-template-columns:1fr;gap:10px}
+    @media (min-width: 900px){ .row{grid-template-columns:1fr 1fr} }
+    .lbl{display:block;color:#b8c4d6;font-size:12px;margin:8px 4px 4px}
+    textarea{
+      width:100%; min-height:220px; resize:vertical; box-sizing:border-box;
+      background:#0a0e1a; color:#e9edf4; border:1px solid var(--border); padding:14px;
+      font-family:var(--mono); line-height:1.45; border-radius:10px;
+    }
+    textarea[readonly]{opacity:.95}
+    .controls{display:flex;flex-wrap:wrap;gap:10px;margin:16px 0}
+    .controls button,.controls label{
+      background:#0b162a; color:#dfe7f3; border:1px solid var(--border);
+      padding:10px 14px; border-radius:10px; cursor:pointer;
+    }
+    .controls button:hover{border-color:#34507b}
+    .controls .primary{background:#0d203c;border-color:#34507b}
+    .badge{display:inline-block;background:#0f223f;border:1px solid #23436f;color:#b8cdf3;
+      padding:6px 10px;border-radius:999px;font-size:12px;margin-left:6px}
+    .kpi{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 0}
+    .kpi .item{background:#0b162a;border:1px solid var(--border);padding:6px 10px;border-radius:999px;font-size:12px;color:#c9d3e1}
+    .toast{
+      position:fixed; left:50%; transform:translateX(-50%);
+      bottom:24px; background:#071a0e; color:#dff6e4; border:1px solid #1e6a37;
+      padding:10px 14px; border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,.35);
+      opacity:0; pointer-events:none; transition:opacity .25s, bottom .25s;
+      z-index: 9999;
+    }
+    .toast.show{opacity:1; bottom:30px}
+    .foot{color:var(--muted);font-size:13px;margin-top:12px}
+    code{background:#0a1120;border:1px solid #1c2c4a;color:#d7e3ff;padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Text cleanup: hidden characters, Markdown markers, emojis, and pseudographics → plain text</h1>
+    <div class="sub">
+      Enter or paste text into the left field — the result will appear on the right and, upon paste/processing, will be
+      <strong>automatically copied</strong> to the clipboard.
+    </div>
+
+    <div class="card">
+      <div class="row">
+        <div>
+          <label for="input" class="lbl">Source text</label>
+          <textarea id="input" placeholder="Enter or paste source text here…"></textarea>
+        </div>
+        <div>
+          <label for="output" class="lbl">Cleaned text (read-only)</label>
+          <textarea id="output" placeholder="The cleaned text will appear here" readonly></textarea>
+        </div>
+      </div>
+    </div>
+
+    <div class="controls">
+      <label title="When pasting/processing the cleaned text will be copied to the clipboard">
+        <input type="checkbox" id="autoCopy" checked /> Auto-copy
+      </label>
+      <button id="pasteBtn" class="primary" title="Read text directly from the clipboard">Paste from clipboard</button>
+      <button id="processBtn" class="primary" title="Clean text from the left field and copy the result">Process now (Ctrl/⌘+Enter)</button>
+      <button id="copyBtn" title="Copy the result to the clipboard">Copy result</button>
+      <button id="clearBtn" title="Clear both fields">Clear fields</button>
+      <span class="badge" id="status">Done</span>
+    </div>
+
+    <div class="kpi" id="kpi"></div>
+    <div class="foot">
+      Removed: zero-width/BOM, NBSP/thin spaces, control characters; typography (— → -, “ ” → ", … → ...),
+      markers/bullets; <strong>Markdown bold/italic, heading #, decorative lines, extra *</strong>; pseudographics;
+      escaping <code>\$</code>.
+    </div>
+  </div>
+
+  <div class="toast" id="toast">Cleaned text copied to clipboard</div>
+
+  <script>
+  (function(){
+    const inputArea = document.getElementById('input');
+    const output = document.getElementById('output');
+    const pasteBtn = document.getElementById('pasteBtn');
+    const processBtn = document.getElementById('processBtn');
+    const copyBtn = document.getElementById('copyBtn');
+    const clearBtn = document.getElementById('clearBtn');
+    const autoCopyEl = document.getElementById('autoCopy');
+    const toast = document.getElementById('toast');
+    const status = document.getElementById('status');
+    const kpi = document.getElementById('kpi');
+
+    // --- UI helpers ---
+    function showToast(msg, ok=true){
+      toast.textContent = msg;
+      toast.style.background = ok ? '#071a0e' : '#2a0d0d';
+      toast.style.borderColor = ok ? '#1e6a37' : '#6a1e1e';
+      toast.classList.add('show');
+      setTimeout(()=> toast.classList.remove('show'), 1800);
+    }
+    function setStatus(text){ status.textContent = text; }
+    function countMatches(text, re){ const m = text.match(re); return m ? m.length : 0; }
+    const debounce = (fn, ms=400) => {
+      let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
+    };
+
+    // --- Pseudographics → ASCII/spaces ---
+    const boxMap = (() => {
+      const asPlus = [
+        '\u250C','\u2510','\u2514','\u2518','\u251C','\u2524','\u252C','\u2534','\u253C',
+        '\u2552','\u2555','\u2558','\u255B','\u255E','\u2561','\u2564','\u2567','\u256A',
+        '\u2554','\u2557','\u255A','\u255D','\u2560','\u2563','\u2566','\u2569','\u256C'
+      ];
+      const asDash = ['\u2500','\u2501','\u2504','\u2505','\u2508','\u2509','\u2550','\u2574','\u2576','\u2578','\u257A'];
+      const asPipe = ['\u2502','\u2503','\u2551','\u2575','\u2577','\u2579','\u257B'];
+      const asShade = ['\u2588','\u2591','\u2592','\u2593'];
+      const asLowerBlocks = ['\u2581','\u2582','\u2583','\u2584','\u2585','\u2586','\u2587'];
+      const m = {};
+      asPlus.forEach(c => m[c] = '+');
+      asDash.forEach(c => m[c] = '-');
+      asPipe.forEach(c => m[c] = '|');
+      asShade.forEach(c => m[c] = ' ');
+      asLowerBlocks.forEach(c => m[c] = ' ');
+      // Rules for arrows
+      m['\u2192'] = '>';
+      m['\u2190'] = '<';
+      m['\u2191'] = '^';
+      m['\u2193'] = 'v';
+      return m;
+    })();
+    const boxRegex = new RegExp('[' + Object.keys(boxMap).join('') + ']', 'g');
+    const emojiRegex = /(\u00a9|\u00ae|[\u2000-\u3300]|\ud83c[\ud000-\udfff]|\ud83d[\ud000-\udfff]|\ud83e[\ud000-\udfff])/g;
+	
+      // --- Sanitizer ---
+    function sanitizeText(input){
+      const stats = [];
+      let text = String(input);
+
+      // 0) Unicode NFKC
+      if (text.normalize){
+        const before = text;
+        text = text.normalize('NFKC');
+        if (text !== before) stats.push(['NFKC normalization', 1]);
+      }
+
+      // 1) Line breaks CR/LF → LF
+      const crlf = countMatches(text, /\r\n?/g);
+      if (crlf) stats.push(['CR/LF → LF', crlf]);
+      text = text.replace(/\r\n?/g, '\n');
+
+      // 2) Zero-width/BOM/format
+      const zwcRe = /[\u200B\u200C\u200D\u2060\uFEFF\u180E]/g;
+      const zwc = countMatches(text, zwcRe);
+      if (zwc) stats.push(['Zero-width/BOM/format', zwc]);
+      text = text.replace(zwcRe, '');
+
+      // 3) Non-breaking and narrow spaces → normal
+      const nbspRe = /[\u00A0\u2007\u202F\u2009\u200A]/g;
+      const nbsp = countMatches(text, nbspRe);
+      if (nbsp) stats.push(['NBSP/thin → space', nbsp]);
+      text = text.replace(nbspRe, ' ');
+
+      // 4) Control chars (except \n/\t)
+      const ctrlRe = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/g;
+      const ctrl = countMatches(text, ctrlRe);
+      if (ctrl) stats.push(['Control characters', ctrl]);
+      text = text.replace(ctrlRe, '');
+
+      // 5) Typography
+      const dashRe = /[–—−]/g; // en/em dash, minus
+      const dash = countMatches(text, dashRe);
+      if (dash) stats.push(['Long dashes/minus → "-"', dash]);
+      text = text.replace(dashRe, '-');
+
+      const quotesDblRe = /[“”„«»]/g;
+      const qd = countMatches(text, quotesDblRe);
+      if (qd) stats.push(['Quotes → "', qd]);
+      text = text.replace(quotesDblRe, '"');
+
+      const quotesSngRe = /[‘’‚‛‹›]/g;
+      const qs = countMatches(text, quotesSngRe);
+      if (qs) stats.push(['Single quotes → \'', qs]);
+      text = text.replace(quotesSngRe, "'");
+
+      const ellipsisRe = /…/g;
+      const ell = countMatches(text, ellipsisRe);
+      if (ell) stats.push(['Ellipsis → ...', ell]);
+      text = text.replace(ellipsisRe, '...');
+
+      const bulletsRe = /[•◦·∙]/g;
+      const blt = countMatches(text, bulletsRe);
+      if (blt) stats.push(['Bullets → "-"', blt]);
+      text = text.replace(bulletsRe, '-');
+
+      // 5b) Markdown artifacts
+      // Headings at line start: "# " .. "###### "
+      const hStart = countMatches(text, /^[ \t]{0,3}#{1,6}[ \t]+/gm);
+      if (hStart) stats.push(['Markdown headings (#)', hStart]);
+      text = text.replace(/^[ \t]{0,3}#{1,6}[ \t]+/gm, '');
+
+      // Closing hashes at end of headings: "Heading ###"
+      const hEnd = countMatches(text, /[ \t]+#{1,6}[ \t]*$/gm);
+      if (hEnd) stats.push(['Hashes at end of headings', hEnd]);
+      text = text.replace(/[ \t]+#{1,6}[ \t]*$/gm, '');
+
+      // Lists "* item" → "- item"
+      const starBul = countMatches(text, /^[ \t]*\*[ \t]+/gm);
+      if (starBul) stats.push(['Lists "* " → "- "', starBul]);
+      text = text.replace(/^[ \t]*\*[ \t]+/gm, '- ');
+
+      // Bold/italic markers: **text**, *text*, __text__, _text_
+      const mdBoldD = countMatches(text, /\*\*[^\n*][\s\S]*?[^\n*]\*\*/g);
+      const mdItalD = countMatches(text, /\*[^\n*][\s\S]*?[^\n*]\*/g);
+      const mdBoldU = countMatches(text, /__[^_\n][\s\S]*?[^_\n]__/g);
+      const mdItalU = countMatches(text, /_[^_\n][\s\S]*?[^_\n]_/g);
+      if (mdBoldD) stats.push(['**bold** removed', mdBoldD]);
+      if (mdItalD) stats.push(['*italic* removed', mdItalD]);
+      if (mdBoldU) stats.push(['__bold__ removed', mdBoldU]);
+      if (mdItalU) stats.push(['_italic_ removed', mdItalU]);
+      text = text
+        .replace(/\*\*([^\n*][\s\S]*?[^\n*])\*\*/g, '$1')
+        .replace(/\*([^\n*][\s\S]*?[^\n*])\*/g, '$1')
+        .replace(/__([^_\n][\s\S]*?[^_\n])__/g, '$1')
+        .replace(/_([^_\n][\s\S]*?[^_\n])_/g, '$1');
+
+      // Decorative lines of # * = _ ~ -
+      const deco = countMatches(text, /^[ \t]*[#*=_~\-]{3,}[ \t]*$/gm);
+      if (deco) stats.push(['Decorative lines (#*=_~-)', deco]);
+      text = text.replace(/^[ \t]*[#*=_~\-]{3,}[ \t]*$/gm, '');
+
+      // Lone * between spaces
+      const loneStars = countMatches(text, /(?<=\s)\*(?=\s)/g);
+      if (loneStars) stats.push(['Lone * between spaces', loneStars]);
+      text = text.replace(/(?<=\s)\*(?=\s)/g, ' ');
+
+      // 6) Pseudographics
+      const boxCnt = countMatches(text, boxRegex);
+      if (boxCnt) stats.push(['Pseudographic boxes/blocks', boxCnt]);
+      text = text.replace(boxRegex, c => boxMap[c] || '');
+
+      // 7) Remove escaping $: "\$" → "$"
+      const escDollar = countMatches(text, /\\+\$/g);
+      if (escDollar) stats.push(['Backslashes before $', escDollar]);
+      text = text.replace(/\\+\$/g, '$');
+
+      // 8) Remove emojis
+      const emojiCount = countMatches(text, emojiRegex);
+      if (emojiCount) stats.push(['Emojis removed', emojiCount]);
+      text = text.replace(emojiRegex, '');
+	  
+	  // 9) Remove spaces before punctuation
+      const puncSpaceCount = countMatches(text, /\s([.,!?;:])/g);
+      if (puncSpaceCount) stats.push(['Spaces before punctuation', puncSpaceCount]);
+      text = text.replace(/\s+([.,!?;:])/, '$1');
+
+      // 10) Spaces/line breaks
+      const aroundNl = countMatches(text, /[ \t]+\n|\n[ \t]+/g);
+      if (aroundNl) stats.push(['Spaces around line breaks', aroundNl]);
+      text = text.replace(/[ \t]*\n[ \t]*/g, '\n');
+
+      const runs = countMatches(text, /[ \t]{2,}/g);
+      if (runs) stats.push(['Repeated spaces/tabs', runs]);
+      text = text.replace(/[ \t]{2,}/g, ' ');
+
+      const manyBlank = countMatches(text, /\n{3,}/g);
+      if (manyBlank) stats.push(['Excess blank lines', manyBlank]);
+      text = text.replace(/\n{3,}/g, '\n\n');
+
+      text = text.split('\n').map(s => s.trimEnd()).join('\n');
+      text = text.trim();
+
+      return { text, stats };
+    }
+
+    // --- Clipboard ---
+    async function copyToClipboard(str){
+      try{
+        await navigator.clipboard.writeText(str);
+        return true;
+      }catch(e){
+        try{
+          const ta = document.createElement('textarea');
+          ta.value = str; ta.style.position = 'fixed'; ta.style.opacity = '0';
+          document.body.appendChild(ta); ta.focus(); ta.select();
+          const ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        }catch(e2){ return false; }
+      }
+    }
+
+    // --- KPI/statistics ---
+    function renderStats(stats){
+      kpi.innerHTML = '';
+      if (!stats || !stats.length) return;
+      for (const [name, count] of stats){
+        if (!count) continue;
+        const el = document.createElement('div');
+        el.className = 'item';
+        el.textContent = `${name}: ${count}`;
+        kpi.appendChild(el);
+      }
+    }
+
+    // --- Main processing ---
+    async function processText(raw, { autoCopy=false } = {}){
+      setStatus('Processing…');
+      const { text, stats } = sanitizeText(raw);
+      output.value = text;
+      renderStats(stats);
+
+      if (autoCopy && autoCopyEl.checked){
+        const ok = await copyToClipboard(text);
+        showToast(ok ? 'Cleaned text copied to clipboard' : 'Auto-copy failed. Press "Copy result".', ok);
+      }
+      setStatus(`Done • ${text.length} chars`);
+    }
+
+    const debouncedLiveProcess = debounce(() => {
+      // Live cleaning while typing — without auto-copying to avoid spamming the clipboard
+      processText(inputArea.value, { autoCopy:false });
+    }, 420);
+
+    // --- Events ---
+    // 1) Live processing on input
+    inputArea.addEventListener('input', debouncedLiveProcess);
+
+    // 2) Paste into field — process and (if enabled) copy
+    inputArea.addEventListener('paste', () => {
+      // Let the default paste finish, then process
+      setTimeout(() => processText(inputArea.value, { autoCopy:true }), 0);
+    });
+
+     // 3) Ctrl/⌘+Enter — process immediately and copy (if enabled)
+    inputArea.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter'){
+        e.preventDefault();
+        processText(inputArea.value, { autoCopy:true });
+      }
+    });
+
+    // Button "Paste from clipboard"
+    pasteBtn.addEventListener('click', async () => {
+      try{
+        const t = await navigator.clipboard.readText();
+        if (t){
+          inputArea.value = t;
+          await processText(t, { autoCopy:true });
+          inputArea.focus();
+        }else{
+          showToast('Clipboard is empty', false);
+        }
+      }catch(e){
+        showToast('Browser blocks clipboard reading. Paste manually (Ctrl/⌘+V).', false);
+        inputArea.focus();
+      }
+    });
+
+    // "Process now"
+    processBtn.addEventListener('click', async () => {
+      await processText(inputArea.value, { autoCopy:true });
+    });
+
+    // "Copy result"
+    copyBtn.addEventListener('click', async () => {
+      if (!output.value){ showToast('Nothing to copy', false); return; }
+      const ok = await copyToClipboard(output.value);
+      showToast(ok ? 'Copied to clipboard' : 'Copy failed', ok);
+    });
+
+    // "Clear fields"
+    clearBtn.addEventListener('click', () => {
+      inputArea.value = '';
+      output.value = '';
+      kpi.innerHTML = '';
+      setStatus('Ready');
+      inputArea.focus();
+    });
+
+    // Initial status
+    setStatus('Ready');
+  })();
+  </script>
