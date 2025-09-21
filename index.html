@@ -194,6 +194,12 @@
       if (htmlEnt) stats.push(['HTML entities', htmlEnt]);
       text = text.replace(htmlEntRe, ' ');
 
+      // 4b) ANSI escape sequences  
+      const ansiRe = /\[[\d;]*[a-zA-Z]/g;
+      const ansi = countMatches(text, ansiRe);
+      if (ansi) stats.push(['ANSI escape codes', ansi]);
+      text = text.replace(ansiRe, '');
+
       // 5) Typography
       const dashRe = /[–—−]/g; // en/em dash, minus
       const dash = countMatches(text, dashRe);
@@ -409,4 +415,5 @@
     setStatus('Ready');
   })();
   </script>
+
 
