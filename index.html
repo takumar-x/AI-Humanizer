@@ -188,6 +188,12 @@
       if (ctrl) stats.push(['Control characters', ctrl]);
       text = text.replace(ctrlRe, '');
 
+      // 4a) HTML entities
+      const htmlEntRe = /&[#\w]+;/g;
+      const htmlEnt = countMatches(text, htmlEntRe);
+      if (htmlEnt) stats.push(['HTML entities', htmlEnt]);
+      text = text.replace(htmlEntRe, ' ');
+
       // 5) Typography
       const dashRe = /[–—−]/g; // en/em dash, minus
       const dash = countMatches(text, dashRe);
@@ -403,3 +409,4 @@
     setStatus('Ready');
   })();
   </script>
+
