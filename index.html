@@ -189,10 +189,10 @@
       text = text.replace(ctrlRe, '');
 
       // 4a) HTML entities
-      const htmlEntRe = /&[#\w]+;/g;
-      const htmlEnt = countMatches(text, htmlEntRe);
-      if (htmlEnt) stats.push(['HTML entities', htmlEnt]);
-      text = text.replace(htmlEntRe, ' ');
+      const ansiRe = /\[[\d;]*[mGKJHFABCDsuhl]/g;
+      const ansi = countMatches(text, ansiRe);
+      if (ansi) stats.push(['ANSI escape codes', ansi]);
+      text = text.replace(ansiRe, '');
 
       // 4b) ANSI escape sequences  
       const ansiRe = /\[[\d;]*[a-zA-Z]/g;
@@ -415,5 +415,6 @@
     setStatus('Ready');
   })();
   </script>
+
 
 
