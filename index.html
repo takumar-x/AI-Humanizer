@@ -1,4 +1,3 @@
-
 <!doctype html>
 <html lang="en">
 <head>
@@ -189,13 +188,13 @@
       text = text.replace(ctrlRe, '');
 
       // 4a) HTML entities
-      const ansiRe = /\[[\d;]*[mGKJHFABCDsuhl]/g;
-      const ansi = countMatches(text, ansiRe);
-      if (ansi) stats.push(['ANSI escape codes', ansi]);
-      text = text.replace(ansiRe, '');
+      const htmlEntRe = /&[#\w]+;/g;
+      const htmlEnt = countMatches(text, htmlEntRe);
+      if (htmlEnt) stats.push(['HTML entities', htmlEnt]);
+      text = text.replace(htmlEntRe, ' ');
 
       // 4b) ANSI escape sequences  
-      const ansiRe = /\[[\d;]*[a-zA-Z]/g;
+      const ansiRe = /\[[\d;]*[mGKJHFABCDsuhl]/g;
       const ansi = countMatches(text, ansiRe);
       if (ansi) stats.push(['ANSI escape codes', ansi]);
       text = text.replace(ansiRe, '');
@@ -415,6 +414,3 @@
     setStatus('Ready');
   })();
   </script>
-
-
-
